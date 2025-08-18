@@ -502,7 +502,7 @@ def create_weather_server() -> FastMCP:
             logger.error(f"Error fetching air quality: {e}")
             return {"error": str(e)}
     
-    def _get_aqi_description(self, aqi: int) -> str:
+    def _get_aqi_description(aqi: int) -> str:
         """Get description for AQI level."""
         descriptions = {
             1: "Air quality is satisfactory, and air pollution poses little or no risk.",
