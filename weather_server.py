@@ -485,7 +485,7 @@ def create_weather_server() -> FastMCP:
                 "air_quality": {
                     "aqi": aqi,
                     "level": aqi_levels.get(aqi, "Unknown"),
-                    "description": self._get_aqi_description(aqi)
+                    "description": mcp._get_aqi_description(aqi)
                 },
                 "pollutants": {
                     "co": f"{air_data['components']['co']} μg/m³",
