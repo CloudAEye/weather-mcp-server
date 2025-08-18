@@ -9,7 +9,6 @@ A comprehensive Model Context Protocol (MCP) server for OpenWeatherMap API integ
 - 🌍 **Location Search** - Find coordinates for any city name
 - 📮 **ZIP Code Support** - Weather lookup by postal codes
 - 💨 **Air Quality** - Pollution data and AQI levels
-- 📊 **Weather Comparison** - Compare conditions across multiple locations
 - 💾 **Smart Caching** - Reduce API calls with intelligent caching
 - 🔄 **Unit Conversion** - Support for metric, imperial, and standard units
 
@@ -142,20 +141,6 @@ Get air pollution data and AQI for a location.
 - 4 = Poor (red)
 - 5 = Very Poor (purple)
 
-### 6. `compare_weather`
-Compare weather between multiple locations.
-
-**Parameters:**
-- `locations` (list): List of city names or coordinates (2-5 locations)
-- `units` (str): Temperature units
-
-**Example:**
-```python
-{
-    "locations": ["London", "Paris", "Berlin"],
-    "units": "metric"
-}
-```
 
 ## Resources
 
@@ -237,7 +222,7 @@ git push -u origin main
 
 ### Get Weather for Multiple Cities
 ```
-"What's the weather like in London, Paris, and Berlin?"
+"What's the weather like in London? And what about Paris and Berlin?"
 ```
 
 ### Plan a Trip

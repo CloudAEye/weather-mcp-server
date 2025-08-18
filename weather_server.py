@@ -111,7 +111,6 @@ def create_weather_server() -> FastMCP:
         - search_location: Find locations by name
         - get_weather_by_zip: Weather by ZIP code
         - get_air_quality: Air pollution data
-        - compare_weather: Compare multiple locations
         
         Features:
         - Automatic caching (10 min default)
@@ -517,62 +516,6 @@ def create_weather_server() -> FastMCP:
     # Helper for AQI descriptions
     mcp._get_aqi_description = _get_aqi_description
     
-    @mcp.tool
-    async def compare_weather(
-        locations: List[str],
-        units: str = Config.DEFAULT_UNITS
-    ) -> Dict[str, Any]:
-        """
-        Compare weather between multiple locations.
-        
-        Args:
-            locations: List of city names or coordinates (max 5)
-            units: Temperature units
-        
-        Returns:
-            Side-by-side weather comparison
-        """
-        if len(locations) > 5:
-            return {"error": "Maximum 5 locations for comparison"}
-        
-        if len(locations) < 2:
-            return {"error": "Minimum 2 locations required for comparison"}
-        
-        comparisons = []
-        errors = []
-        
-        for location in locations:
-            weather = await get_current_weather(location, units, include_details=False)
-            if "error" in weather:
-                errors.append({"location": location, "error": weather["error"]})
-            else:
-                comparisons.append({
-                    "location": weather["location"]["name"],
-                    "country": weather["location"]["country"],
-                    "temperature": weather["current"]["temperature"],
-                    "feels_like": weather["current"]["feels_like"],
-                    "condition": weather["current"]["condition"],
-                    "description": weather["current"]["description"]
-                })
-        
-        if not comparisons:
-            return {"error": "Could not fetch weather for any location", "details": errors}
-        
-        # Calculate statistics
-        temps = [c["temperature"] for c in comparisons]
-        
-        return {
-            "comparison": comparisons,
-            "statistics": {
-                "warmest": max(comparisons, key=lambda x: x["temperature"])["location"],
-                "coldest": min(comparisons, key=lambda x: x["temperature"])["location"],
-                "average_temperature": round(sum(temps) / len(temps), 1),
-                "temperature_range": round(max(temps) - min(temps), 1)
-            },
-            "units": units,
-            "errors": errors if errors else None
-        }
-    
     # ========== Resources ==========
     
     @mcp.resource("weather://api/status")
@@ -655,7 +598,7 @@ def create_weather_server() -> FastMCP:
         5. Provide packing recommendations
         6. Suggest weather-appropriate activities for each location
         
-        Use compare_weather and get_forecast tools for comprehensive analysis.
+        Use get_current_weather for each destination and get_forecast tools for comprehensive analysis.
         """
     
     logger.info(f"{Config.SERVER_NAME} created successfully")

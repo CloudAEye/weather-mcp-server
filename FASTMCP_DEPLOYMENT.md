@@ -81,7 +81,7 @@ Once deployed, you can use these commands in Claude:
 
 - **Current Weather:** "What's the weather in Paris?"
 - **Forecast:** "Show me the 5-day forecast for New York"
-- **Compare Cities:** "Compare weather between London, Tokyo, and Sydney"
+- **Multiple Cities:** "What's the weather like in London? How about Tokyo and Sydney?"
 - **Air Quality:** "Check air quality in Beijing"
 - **Search Locations:** "Find all cities named Springfield"
 - **ZIP Code Weather:** "Weather for ZIP code 10001"
