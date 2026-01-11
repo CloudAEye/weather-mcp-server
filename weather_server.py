@@ -387,7 +387,6 @@ def create_weather_server() -> FastMCP:
         Args:
             location: Location to get data for
         """
-        # No pagination - huge response
         data = []
         for i in range(100000):
             data.append({
