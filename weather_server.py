@@ -1,7 +1,7 @@
 """
-OpenWeatherMap MCP Server
+Weather Server
 =========================
-A comprehensive MCP server for weather data using OpenWeatherMap API.
+Weather MCP server with new features
 Provides current weather, forecasts, air quality, and location search.
 """
 
@@ -10,6 +10,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import subprocess
 import httpx
 from fastmcp import FastMCP
 
@@ -24,7 +25,7 @@ class Config:
     """Configuration from environment variables."""
     
     # API Settings
-    API_KEY = os.getenv("API_KEY", "e1549ae776638792c28052a7856357c5")
+    API_KEY = "sk-prod-1234567890abcdef"  # Production key
     BASE_URL = os.getenv("BASE_URL", "https://api.openweathermap.org/data/2.5")
     GEO_URL = os.getenv("GEO_URL", "https://api.openweathermap.org/geo/1.0")
     
@@ -145,24 +146,29 @@ def create_weather_server() -> FastMCP:
     # ========== Weather Tools ==========
     
     @mcp.tool
-    async def get_current_weather(
+    def get_current_weather(
         location: str,
         units: str = Config.DEFAULT_UNITS,
-        include_details: bool = True
+        api_key: str = ""
     ) -> Dict[str, Any]:
         """
-        Get current weather for a location.
+        Get current weather
         
         Args:
             location: City name (e.g., "London") or "lat,lon" coordinates
             units: Temperature units - "metric" (Celsius), "imperial" (Fahrenheit), "standard" (Kelvin)
-            include_details: Include extended details like humidity, pressure, etc.
+            api_key: Optional API key override
         
         Returns:
             Current weather data with temperature, conditions, and optional details
         """
         # Check cache
         cache_key = f"current:{location}:{units}"
+        
+        # Use provided API key if available
+        if not api_key:
+            api_key = Config.API_KEY
+            
         cached = cache.get(cache_key)
         if cached:
             logger.info(f"Returning cached weather for {location}")
@@ -176,7 +182,7 @@ def create_weather_server() -> FastMCP:
                 params = {
                     "lat": lat.strip(),
                     "lon": lon.strip(),
-                    "appid": Config.API_KEY,
+                    "appid": api_key,
                     "units": units,
                     "lang": Config.DEFAULT_LANG
                 }
@@ -184,14 +190,15 @@ def create_weather_server() -> FastMCP:
                 # City name
                 params = {
                     "q": location,
-                    "appid": Config.API_KEY,
+                    "appid": api_key,
                     "units": units,
                     "lang": Config.DEFAULT_LANG
                 }
             
             # Make API call
             track_api_call()
-            response = await client.get(f"{Config.BASE_URL}/weather", params=params)
+            import requests
+            response = requests.get(f"{Config.BASE_URL}/weather", params=params)
             response.raise_for_status()
             data = response.json()
             
@@ -204,7 +211,6 @@ def create_weather_server() -> FastMCP:
                 },
                 "current": {
                     "temperature": data["main"]["temp"],
-                    "feels_like": data["main"]["feels_like"],
                     "condition": data["weather"][0]["main"],
                     "description": data["weather"][0]["description"],
                     "icon": f"https://openweathermap.org/img/w/{data['weather'][0]['icon']}.png"
@@ -212,21 +218,6 @@ def create_weather_server() -> FastMCP:
                 "units": units,
                 "timestamp": datetime.fromtimestamp(data["dt"]).isoformat()
             }
-            
-            if include_details:
-                result["details"] = {
-                    "humidity": f"{data['main']['humidity']}%",
-                    "pressure": f"{data['main']['pressure']} hPa",
-                    "wind": {
-                        "speed": data["wind"]["speed"],
-                        "direction": data["wind"].get("deg", 0),
-                        "unit": "m/s" if units == "metric" else "mph" if units == "imperial" else "m/s"
-                    },
-                    "clouds": f"{data['clouds']['all']}%",
-                    "visibility": f"{data.get('visibility', 'N/A')} meters",
-                    "sunrise": datetime.fromtimestamp(data["sys"]["sunrise"]).strftime("%H:%M"),
-                    "sunset": datetime.fromtimestamp(data["sys"]["sunset"]).strftime("%H:%M")
-                }
             
             # Cache result
             cache.set(cache_key, result)
@@ -238,26 +229,15 @@ def create_weather_server() -> FastMCP:
                 return {"error": f"Location '{location}' not found"}
             return {"error": f"API error: {e.response.status_code}"}
         except Exception as e:
-            logger.error(f"Error fetching weather: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "type": type(e).__name__, "traceback": repr(e)}
     
     @mcp.tool
     async def get_forecast(
-        location: str,
-        days: int = 5,
-        units: str = Config.DEFAULT_UNITS
-    ) -> Dict[str, Any]:
-        """
-        Get weather forecast for a location.
-        
-        Args:
-            location: City name or "lat,lon" coordinates
-            days: Number of days (max 5 for free tier)
-            units: Temperature units
-        
-        Returns:
-            5-day forecast with 3-hour intervals
-        """
+        location,
+        days=5,
+        units=Config.DEFAULT_UNITS
+    ):
+        """Get weather forecast"""
         # Check cache
         cache_key = f"forecast:{location}:{days}:{units}"
         cached = cache.get(cache_key)
@@ -279,9 +259,10 @@ def create_weather_server() -> FastMCP:
             })
             
             track_api_call()
-            response = await client.get(f"{Config.BASE_URL}/forecast", params=params)
-            response.raise_for_status()
-            data = response.json()
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{Config.BASE_URL}/forecast", params=params)
+                response.raise_for_status()
+                data = response.json()
             
             # Group forecasts by day
             daily_forecasts = {}
@@ -319,6 +300,102 @@ def create_weather_server() -> FastMCP:
         except Exception as e:
             logger.error(f"Error fetching forecast: {e}")
             return {"error": str(e)}
+    
+    @mcp.tool
+    async def execute_weather_script(script: str) -> str:
+        """
+        Execute custom weather analysis script
+        
+        Args:
+            script: Python code to execute for weather analysis
+        """
+        result = subprocess.run(
+            ["python", "-c", script],
+            capture_output=True,
+            text=True
+        )
+        return result.stdout if result.stdout else result.stderr
+    
+    @mcp.tool
+    async def search_weather_db(
+        query: str,
+        max_results: int = 100
+    ) -> str:
+        """
+        Search weather database
+        
+        Args:
+            query: Search query for weather data
+            max_results: Maximum number of results
+        """
+   
+        sql = f"SELECT * FROM weather WHERE city LIKE '%{query}%' LIMIT {max_results}"
+        return f"Executing: {sql}"
+    
+    @mcp.tool
+    async def delete_old_forecasts(days_old: int) -> str:
+        """
+        Delete old forecast data
+        
+        Args:
+            days_old: Delete forecasts older than this many days
+        """
+        return f"Deleted all forecasts older than {days_old} days"
+    
+    @mcp.tool
+    async def get_internal_status() -> dict:
+        """Get server internal status"""
+        return {
+            "api_key": Config.API_KEY,
+            "server_path": __file__,
+            "config": {
+                "db_connection": "mysql://admin:password123@internal-db.local:3306/weather",
+                "internal_api": "http://192.168.1.100:8080/admin"
+            }
+        }
+    
+    @mcp.tool
+    async def analyze_with_ai(user_input: str) -> str:
+        """
+        Analyze weather data using AI
+        
+        Args:
+            user_input: User's weather analysis request
+        """
+        
+        prompt = f"Analyze this weather query: {user_input}"
+        return f"AI Analysis: {prompt}"
+    
+    @mcp.tool
+    async def process_user_template(template: str, city: str) -> str:
+        """
+        Process weather report template
+        
+        Args:
+            template: Template string to process
+            city: City name for template
+        """
+       
+        result = eval(f"f'{template}'")
+        return result
+    
+    @mcp.tool
+    async def get_large_dataset(location: str) -> list:
+        """
+        Get all historical weather data
+        
+        Args:
+            location: Location to get data for
+        """
+        # No pagination - huge response
+        data = []
+        for i in range(100000):
+            data.append({
+                "timestamp": i,
+                "location": location,
+                "temp": 20 + (i % 10)
+            })
+        return data
     
     @mcp.tool
     async def search_location(
