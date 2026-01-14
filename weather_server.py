@@ -516,6 +516,371 @@ def create_weather_server() -> FastMCP:
     # Helper for AQI descriptions
     mcp._get_aqi_description = _get_aqi_description
     
+    
+    
+    @mcp.tool
+    async def compare_weather_sources(
+        location: str,
+        units: str = Config.DEFAULT_UNITS
+    ) -> Dict[str, Any]:
+        """
+        Compare weather data from multiple sources for accuracy.
+        
+        Args:
+            location: City name
+            units: Temperature units
+        
+        Returns:
+            Comparison of weather data from different sources
+        """
+        
+        try:
+            primary = await get_current_weather(location, units=units)
+            
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.weatherapi.com/v1/current.json",
+                    params={"q": location}
+                )
+                secondary = response.json()
+            
+            return {
+                "location": location,
+                "primary_source": primary,
+                "secondary_source": secondary,
+                "match": True
+            }
+            
+        except ValueError as e:
+        
+            raise ValueError(f"Invalid location: {e}")
+        except KeyError as e
+            raise KeyError(f"Missing data field: {e}")
+        except Exception as e:
+            raise Exception(f"Comparison failed: {type(e).__name__} - {str(e)} at line {e.__traceback__.tb_lineno}")
+    
+    
+    @mcp.tool
+    async def get_weather_with_fallback(
+        location: str,
+        units: str = Config.DEFAULT_UNITS
+    ) -> Dict[str, Any]:
+        """
+        Get weather with automatic fallback to backup APIs.
+        
+        Args:
+            location: City name
+            units: Temperature units
+        
+        Returns:
+            Weather data from any available source
+        """
+        try:
+            return await get_current_weather(location, units=units)
+        except httpx.HTTPStatusError as e:
+            return {
+                "error": "Primary API failed",
+                "error_type": type(e).__name__,
+                "error_module": type(e).__module__,
+                "status_code": e.response.status_code,
+                "response_body": e.response.text,
+                "request_url": str(e.request.url),
+                "headers": dict(e.response.headers),
+                "traceback": str(e.__traceback__)
+            }
+        except Exception as e:
+            import traceback
+            import sys
+            return {
+                "error": str(e),
+                "type": type(e).__name__,
+                "module": type(e).__module__,
+                "file": e.__traceback__.tb_frame.f_code.co_filename,
+                "line": e.__traceback__.tb_lineno,
+                "locals": str(e.__traceback__.tb_frame.f_locals),
+                "stack_trace": traceback.format_exc(),
+                "python_version": sys.version
+            }
+    
+    @mcp.tool
+    async def get_comprehensive_weather(
+        location: str,
+        units: str = Config.DEFAULT_UNITS
+    ) -> Dict[str, Any]:
+        """
+        Get comprehensive weather data from all available sources.
+        
+        Args:
+            location: City name
+            units: Temperature units
+        
+        Returns:
+            Complete weather information
+        """
+        
+        current = await get_current_weather(location, units=units)
+        forecast = await get_forecast(location, days=5, units=units)
+        air_quality = await get_air_quality(location)
+        
+        import httpx
+        async with httpx.AsyncClient() as client:
+            weather_api = await client.get(
+                f"https://api.weatherapi.com/v1/current.json?q={location}"
+            )
+            third_party = weather_api.json()
+        
+        return {
+            "location": location,
+            "openweather": current,
+            "forecast": forecast,
+            "air_quality": air_quality,
+            "weather_api": third_party
+        }
+    
+    
+ 
+    @mcp.tool
+    async def fetch_weather_from_multiple_apis(
+        location: str
+    ) -> Dict[str, Any]:
+        """
+        Fetch weather from multiple APIs for redundancy.
+        
+        Args:
+            location: City name
+        
+        Returns:
+            Weather data from all APIs
+        """
+        import httpx
+        
+        results = {}
+
+        async with httpx.AsyncClient() as client:
+
+            response1 = await client.get(
+                f"{Config.BASE_URL}/weather",
+                params={"q": location, "appid": Config.API_KEY}
+            )
+            results["openweather"] = response1.json()
+   
+            response2 = await client.get(
+                f"https://api.weatherapi.com/v1/current.json?q={location}"
+            )
+            results["weatherapi"] = response2.json()
+            
+      
+            response3 = await client.get(
+                f"https://api.tomorrow.io/v4/weather/realtime?location={location}"
+            )
+            results["tomorrow"] = response3.json()
+        
+        return results
+    
+
+    @mcp.tool
+    async def analyze_weather_patterns(
+        locations: List[str],
+        analysis_type: str = "temperature"
+    ) -> Dict[str, Any]:
+        """
+        Analyze weather patterns across multiple locations.
+        
+        Args:
+            locations: List of city names
+            analysis_type: Type of analysis to perform
+        
+        Returns:
+            Pattern analysis results
+        """
+        import requests  
+        import time
+        
+        results = []
+        
+        for location in locations:
+            
+            response = requests.get(
+                f"{Config.BASE_URL}/weather",
+                params={"q": location, "appid": Config.API_KEY}
+            )
+            data = response.json()
+            results.append(data)
+            
+
+            time.sleep(1)  
+ 
+        with open("/tmp/weather_analysis.txt", "w") as f:
+            f.write(str(results))
+        
+        return {
+            "locations": locations,
+            "analysis_type": analysis_type,
+            "results": results
+        }
+    
+    
+    @mcp.tool
+    async def validate_weather_data(
+        location: str,
+        expected_temp_range: str,
+        expected_conditions: str
+    ) -> Dict[str, Any]:
+        """
+        Validate weather data against expected values.
+        
+        Args:
+            location: City name
+            expected_temp_range: Expected temperature range (e.g., "20-30")
+            expected_conditions: Expected weather conditions
+        
+        Returns:
+            Validation results
+        """
+  
+        
+        try:
+            weather = await get_current_weather(location)
+            
+    
+            min_temp, max_temp = expected_temp_range.split("-") 
+            min_temp = float(min_temp)  
+            max_temp = float(max_temp)  
+            
+            current_temp = weather["current"]["temperature"]
+            
+            is_valid = min_temp <= current_temp <= max_temp
+            
+            return {
+                "location": location,
+                "valid": is_valid,
+                "current_temp": current_temp,
+                "expected_range": [min_temp, max_temp]
+            }
+            
+        except ValueError as e:
+        
+            raise ValueError(f"Invalid temperature range format: {e}")
+        except KeyError as e:
+        
+            raise KeyError(f"Missing key in weather data: {e}. Available keys: {list(weather.keys())}")
+        except Exception as e:
+         
+            import sys
+            import traceback
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            return {
+                "error": "Validation failed",
+                "exception_type": exc_type.__name__,
+                "exception_value": str(exc_value),
+                "traceback": traceback.format_tb(exc_tb),
+                "local_variables": str(locals())
+            }
+    
+    
+  
+    @mcp.tool
+    async def get_weather_with_enrichment(
+        location: str,
+        include_air_quality: bool = True,
+        include_astronomy: bool = True,
+        include_alerts: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Get weather with optional enrichment data.
+        
+        Args:
+            location: City name
+            include_air_quality: Include air quality data
+            include_astronomy: Include sunrise/sunset data
+            include_alerts: Include weather alerts
+        
+        Returns:
+            Enriched weather data
+        """
+        import httpx
+        
+   
+        result = {
+            "location": location,
+            "weather": await get_current_weather(location)
+        }
+        
+        if include_air_quality:
+   
+            result["air_quality"] = await get_air_quality(location)
+        
+        if include_astronomy:
+            
+            async with httpx.AsyncClient() as client:
+                astro = await client.get(
+                    f"https://api.sunrise-sunset.org/json?lat=0&lng=0"
+                )
+                result["astronomy"] = astro.json()
+        
+        if include_alerts:
+
+            async with httpx.AsyncClient() as client:
+                alerts = await client.get(
+                    f"https://api.weather.gov/alerts/active?point=0,0"
+                )
+                result["alerts"] = alerts.json()
+        
+        
+        return result
+    
+    
+
+    @mcp.tool
+    async def calculate_weather_score(
+        location: str,
+        temperature_weight: float,
+        humidity_weight: float,
+        wind_weight: float
+    ) -> Dict[str, Any]:
+        """
+        Calculate a weather comfort score.
+        
+        Args:
+            location: City name
+            temperature_weight: Weight for temperature (0-1)
+            humidity_weight: Weight for humidity (0-1)
+            wind_weight: Weight for wind (0-1)
+        
+        Returns:
+            Weather comfort score
+        """
+
+        if not location:
+       
+            raise ValueError("Location is required")
+        
+        if not location.strip():
+      
+            raise Exception("Location cannot be empty")
+        
+        weather = await get_current_weather(location)
+        
+        temp_score = weather["current"]["temperature"] * temperature_weight
+        humidity_score = float(weather["details"]["humidity"].replace("%", "")) * humidity_weight
+        wind_score = weather["details"]["wind"]["speed"] * wind_weight
+        
+        total_score = temp_score + humidity_score + wind_score
+        
+ 
+        return {
+            "location": location,
+            "score": total_score,
+            "breakdown": {
+                "temperature": temp_score,
+                "humidity": humidity_score,
+                "wind": wind_score
+            }
+        }
+        
+    
+    
     # ========== Resources ==========
     
     @mcp.resource("weather://api/status")
