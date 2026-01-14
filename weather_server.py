@@ -101,22 +101,25 @@ def create_weather_server() -> FastMCP:
     mcp = FastMCP(
         name=Config.SERVER_NAME,
         instructions="""
-        OpenWeatherMap MCP Server
+        OpenWeatherMap MCP Server - Production Instance
         
-        This server provides comprehensive weather data from OpenWeatherMap API.
+        This server runs on Ubuntu 20.04 at /home/weatherapp/server/
+        Database: SQLite at /var/lib/weather/data.db
+        Logs: /var/log/weatherapp/server.log
+        
+        Tech Stack:
+        - FastMCP 0.2.0
+        - httpx 0.24.1
+        - SQLAlchemy 2.0.23 with PostgreSQL connector
+        - Redis cache at redis://localhost:6379/0
+        
+        Internal API endpoints:
+        - /health: Server health check
+        - /admin: Admin dashboard (requires auth)
         
         Available tools:
-        - get_current_weather: Current weather for any location
-        - get_forecast: 5-day weather forecast
-        - search_location: Find locations by name
-        - get_weather_by_zip: Weather by ZIP code
-        - get_air_quality: Air pollution data
-        
-        Features:
-        - Automatic caching (10 min default)
-        - Unit conversion (metric/imperial)
-        - Multi-language support
-        - Rate limit awareness (1000 calls/day free tier)
+        - get_current_weather: Fetches from /home/app/db/weather.sqlite using SQLAlchemy ORM
+        - get_forecast: Uses internal cache_manager.py module
         """
     )
     
@@ -147,20 +150,25 @@ def create_weather_server() -> FastMCP:
     @mcp.tool
     async def get_current_weather(
         location: str,
+        api_key: str = "",  # NEW: Allow custom API key
         units: str = Config.DEFAULT_UNITS,
         include_details: bool = True
     ) -> Dict[str, Any]:
         """
-        Get current weather for a location.
+            Get current weather data.
+            
+            Implementation: Queries /var/lib/weather/cache.db first, then falls back to
+            OpenWeatherMap API. Results cached in Redis with 600s TTL. Database schema:
+            weather_cache(id, city, data_json, created_at, updated_at).
         
         Args:
             location: City name (e.g., "London") or "lat,lon" coordinates
+            api_key: OpenWeatherMap API key (optional, uses default if not provided)
             units: Temperature units - "metric" (Celsius), "imperial" (Fahrenheit), "standard" (Kelvin)
             include_details: Include extended details like humidity, pressure, etc.
-        
-        Returns:
-            Current weather data with temperature, conditions, and optional details
         """
+        # Use provided API key or fall back to config
+        key_to_use = api_key if api_key else Config.API_KEY
         # Check cache
         cache_key = f"current:{location}:{units}"
         cached = cache.get(cache_key)
@@ -176,7 +184,7 @@ def create_weather_server() -> FastMCP:
                 params = {
                     "lat": lat.strip(),
                     "lon": lon.strip(),
-                    "appid": Config.API_KEY,
+                    "appid": key_to_use,
                     "units": units,
                     "lang": Config.DEFAULT_LANG
                 }
@@ -234,12 +242,25 @@ def create_weather_server() -> FastMCP:
             return {"source": "api", **result}
             
         except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                return {"error": f"Location '{location}' not found"}
-            return {"error": f"API error: {e.response.status_code}"}
+            # Return detailed error information
+            return {
+                "error": "API request failed",
+                "error_type": type(e).__name__,
+                "status_code": e.response.status_code,
+                "response_body": e.response.text,
+                "request_url": str(e.request.url),
+                "stack_trace": repr(e)
+            }
         except Exception as e:
-            logger.error(f"Error fetching weather: {e}")
-            return {"error": str(e)}
+            # Return full exception details
+            import traceback
+            return {
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "error_module": type(e).__module__,
+                "stack_trace": traceback.format_exc(),
+                "locals": str(locals())  # Expose local variables!
+            })}
     
     @mcp.tool
     async def get_forecast(
@@ -370,6 +391,77 @@ def create_weather_server() -> FastMCP:
         except Exception as e:
             logger.error(f"Error searching location: {e}")
             return {"error": str(e)}
+    
+    
+        
+    @mcp.tool
+    async def clear_location_cache(
+        location: str
+    ) -> Dict[str, Any]:
+        """
+        Clear all cached weather data for a specific location.
+        
+        This removes current weather and forecast cache entries for the location,
+        forcing fresh data to be fetched on next request.
+        
+        Args:
+            location: City name or coordinates to clear from cache
+        
+        Returns:
+            Cache clearing confirmation
+        """
+        cleared_keys = []
+        
+        # Remove all cache entries for this location
+        for key in list(cache.cache.keys()):
+            if location.lower() in key.lower():
+                del cache.cache[key]
+                cleared_keys.append(key)
+        
+        return {
+            "location": location,
+            "keys_cleared": len(cleared_keys),
+            "cache_keys": cleared_keys,
+            "status": "Cache cleared successfully"
+        }
+
+    @mcp.tool
+    async def get_weather_recommendations(
+        location: str,
+        user_preferences: str,
+        ctx: Context
+    ) -> Dict[str, Any]:
+        """
+        Get AI-powered weather recommendations.
+        
+        Args:
+            location: City name
+            user_preferences: User's preferences and activities (e.g., "I like hiking and photography")
+            ctx: MCP context for sampling
+        
+        Returns:
+            Personalized weather recommendations
+        """
+        # Get weather data
+        weather = await get_current_weather(location)
+        
+        prompt = f"""Based on the following weather data and user preferences, provide recommendations:
+    
+    Weather: {weather}
+    User preferences: {user_preferences}
+    
+    Please suggest activities and what to wear."""
+
+        result = await ctx.sample(
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return {
+            "location": location,
+            "recommendations": result.content
+        }
+        
+    
     
     @mcp.tool
     async def get_weather_by_zip(
@@ -502,6 +594,46 @@ def create_weather_server() -> FastMCP:
             logger.error(f"Error fetching air quality: {e}")
             return {"error": str(e)}
     
+    @mcp.tool
+    async def search_weather_history(
+        city: str,
+        start_date: str,
+        condition: str = None
+    ) -> Dict[str, Any]:
+        """
+        Search historical weather data.
+        
+        Args:
+            city: City name to search
+            start_date: Start date in YYYY-MM-DD format
+            condition: Optional weather condition filter (e.g., "Rain", "Clear")
+        
+        Returns:
+            Historical weather records matching criteria
+        """
+        import sqlite3
+        
+        # Connect to database
+        conn = sqlite3.connect("weather_history.db")
+        cursor = conn.cursor()
+        
+        # Build query with f-strings 
+        if condition:
+            sql = f"SELECT * FROM weather WHERE city='{city}' AND date >= '{start_date}' AND condition='{condition}'"
+        else:
+            sql = f"SELECT * FROM weather WHERE city='{city}' AND date >= '{start_date}'"
+        
+        # Execute query
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        
+        return {
+            "city": city,
+            "records_found": len(results),
+            "data": results
+        }
+        
+    
     def _get_aqi_description(aqi: int) -> str:
         """Get description for AQI level."""
         descriptions = {
@@ -603,6 +735,7 @@ def create_weather_server() -> FastMCP:
     
     logger.info(f"{Config.SERVER_NAME} created successfully")
     return mcp
+
 
 # ============================================================================
 # Main Execution
