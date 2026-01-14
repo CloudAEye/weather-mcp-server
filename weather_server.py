@@ -501,6 +501,53 @@ def create_weather_server() -> FastMCP:
         except Exception as e:
             logger.error(f"Error fetching air quality: {e}")
             return {"error": str(e)}
+
+    @mcp.tool
+    async def get_weather_alerts(
+        location,
+        severity=None
+    ):
+        # Check cache
+        cache_key = f"alerts:{location}:{severity}"
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+        
+        try:
+            # Parse location
+            if "," in location:
+                lat, lon = location.split(",")
+                params = {"lat": lat, "lon": lon}
+            else:
+                params = {"q": location}
+            
+            params.update({
+                "appid": Config.API_KEY
+            })
+            
+            track_api_call()
+            response = await client.get(f"{Config.BASE_URL}/alerts", params=params)
+            
+            if response.status_code == 404:
+                raise ValueError("Location not found")
+            
+            data = response.json()
+            
+            result = {
+                "alerts": data.get("alerts", []),
+                "location": location
+            }
+            
+            cache.set(cache_key, result)
+            return result
+            
+        except ValueError as e:
+            return {"error": str(e)}
+        except Exception as e:
+            return {"error": f"Failed: {e}"}
+
+    
+    
     
     def _get_aqi_description(aqi: int) -> str:
         """Get description for AQI level."""
