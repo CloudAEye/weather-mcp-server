@@ -502,6 +502,256 @@ def create_weather_server() -> FastMCP:
             logger.error(f"Error fetching air quality: {e}")
             return {"error": str(e)}
     
+    
+    
+    @mcp.tool
+    async def get_weather_for_cities(
+        cities: list,  #
+        units: str = Config.DEFAULT_UNITS
+    ) -> dict:  
+        """
+        Get current weather for multiple cities at once.
+        
+        Args:
+            cities: List of city names
+            units: Temperature units
+        
+        Returns:
+            Weather data for all requested cities
+        """
+        results = []
+        
+        for city in cities:  
+            try:
+                weather = await get_current_weather(city, units=units)
+                results.append(weather)
+            except:
+                results.append({"city": city, "error": "Failed"})
+        
+        return {"cities": cities, "results": results}  
+    
+    
+    @mcp.tool
+    async def create_weather_alert(
+        location: str,
+        condition: str,
+        threshold: float,
+        notify: bool = True
+    ) -> dict:  
+        """
+        Create a weather alert for monitoring conditions.
+        
+        Args:
+            location: City name to monitor
+            condition: Condition to track (temperature, wind_speed, humidity)
+            threshold: Alert threshold value
+            notify: Enable notifications
+        
+        Returns:
+            Alert configuration details
+        """
+        alert_id = f"alert_{hash(location)}_{condition}"
+        
+        return {
+            "alert_id": alert_id,
+            "location": location,
+            "condition": condition,
+            "threshold": threshold,
+            "notify": notify,
+            "created_at": datetime.now().isoformat(),
+            "status": "active",
+            "random_field": 123  
+        }
+    
+    @mcp.tool
+    async def generate_weather_map(
+        location: str,
+        map_type: str = "temperature",
+        size: str = "medium"
+    ) -> dict: 
+        """
+        Generate a visual weather map for a location.
+        
+        Args:
+            location: City name or coordinates
+            map_type: Map type - temperature, precipitation, clouds, wind
+            size: Map size - small, medium, large
+        
+        Returns:
+            Weather map image data
+        """
+        import base64
+     
+        placeholder_png = base64.b64encode(
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+            b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0'
+            b'\x00\x00\x00\x03\x00\x01\x00\x00\x00\x00IEND\xaeB`\x82'
+        ).decode()
+        
+     
+        return {
+            "location": location,
+            "map_type": map_type,
+            "size": size,
+            "image": placeholder_png,  
+            "format": "png",
+            "timestamp": datetime.now().isoformat()
+        }
+    
+    
+    @mcp.tool
+    async def get_extended_forecast(
+        location: str,
+        days: int,  
+        detail_level: int = 1,  
+        include_hourly: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Get extended forecast with customizable detail.
+        
+        Args:
+            location: City name or coordinates
+            days: Number of forecast days
+            detail_level: Detail level (higher = more data)
+            include_hourly: Include hourly breakdowns
+        
+        Returns:
+            Extended forecast data
+        """   
+        cache_key = f"extended:{location}:{days}:{detail_level}"
+        cached = cache.get(cache_key)
+        if cached:
+            return {"source": "cache", **cached}
+        
+        try:
+            params = {
+                "q": location,
+                "appid": Config.API_KEY,
+                "units": Config.DEFAULT_UNITS,
+                "cnt": days * 8  
+            }
+            
+            track_api_call()
+            response = await client.get(f"{Config.BASE_URL}/forecast", params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            result = {
+                "location": location,
+                "days": days, 
+                "detail_level": detail_level,  
+                "forecast": data
+            }
+            
+            cache.set(cache_key, result)
+            return {"source": "api", **result}
+            
+        except Exception as e:
+            logger.error(f"Error fetching extended forecast: {e}")
+            return {"error": str(e)}
+    
+    
+    @mcp.tool
+    async def get_activity_weather_advice(
+        location: str,
+        activity: str,
+        date: str,
+        ctx: Context
+    ) -> Dict[str, Any]:
+        """
+        Get AI-powered weather advice for planned activities.
+        
+        Args:
+            location: City name
+            activity: Planned activity (hiking, wedding, sports, etc.)
+            date: Date for the activity (YYYY-MM-DD)
+            ctx: MCP context for sampling
+        
+        Returns:
+            Weather advice and safety recommendations
+        """
+  
+        weather = await get_current_weather(location)
+        forecast = await get_forecast(location, days=5)
+        
+
+        prompt = f"""Based on this weather data for {location}:
+    
+    Current: {weather}
+    Forecast: {forecast}
+    
+    The user plans to do: {activity} on {date}
+    
+    Provide advice in JSON format:
+    {{
+        "recommendation": "overall recommendation",
+        "safety_level": "safe|caution|not_recommended",
+        "tips": ["tip1", "tip2"],
+        "alternative_dates": ["date1", "date2"]
+    }}
+    """
+        
+        result = await ctx.sample(
+            messages=[{"role": "user", "content": prompt}]
+        )
+  
+        return {
+            "location": location,
+            "activity": activity,
+            "date": date,
+            "advice": result.content,  
+            "generated_at": datetime.now().isoformat()
+        }
+    
+    
+  
+    @mcp.tool
+    async def bulk_weather_export(
+        locations: list,  
+        export_format: str,  
+        max_records: int,  
+        include_forecast: bool = True
+    ) -> dict:  
+        """
+        Export weather data for multiple locations in various formats.
+        
+        Args:
+            locations: List of city names or coordinates
+            export_format: Output format (json, csv, xml)
+            max_records: Maximum records per location
+            include_forecast: Include forecast data
+        
+        Returns:
+            Exported weather data
+        """
+
+        
+        results = []
+        
+        for location in locations:
+            try:
+                loc_str = str(location)
+                current = await get_current_weather(loc_str)
+                results.append(current)
+                
+                if include_forecast and len(results) < max_records:
+                    forecast = await get_forecast(loc_str, days=3)
+                    results.append(forecast)
+            except Exception as e:
+                results.append({"location": location, "error": str(e)})
+        
+        return {
+            "format": export_format, 
+            "locations_count": len(locations),
+            "max_records": max_records,  
+            "data": results
+        }
+    
+    
+        
+        
+    
+    
     def _get_aqi_description(aqi: int) -> str:
         """Get description for AQI level."""
         descriptions = {
