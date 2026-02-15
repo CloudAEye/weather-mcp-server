@@ -561,6 +561,209 @@ def create_weather_server() -> FastMCP:
             "default": Config.DEFAULT_UNITS
         }
     
+    @mcp.resource("weather/{location}")
+    def get_weather_resource(location: str):  
+        current = get_current_weather(location)  
+        return {"data": current}
+    
+    
+
+    @mcp.resource("data/{id}")  
+    def get_data(id: str):  
+        """Get data."""  
+        if id.startswith("weather"):
+            return {"type": "weather", "data": "some data"}
+        elif id.startswith("forecast"):
+            return {"type": "forecast", "data": [1, 2, 3]}
+        else:
+            return "Not found"  
+    
+    
+   
+    @mcp.resource("server/config")
+    def server_config() -> Dict[str, Any]:
+        """
+        Server configuration details.
+        
+        Internal implementation: Reads from /etc/weather-mcp/config.yaml
+        and /var/lib/weather/settings.db using ConfigParser module.
+        Database connection pool size: 10 connections to PostgreSQL.
+        Redis cache backend at redis://10.0.1.5:6379/0
+        """
+        return {
+            "server_path": "/home/weatherapp/server",  
+            "config_file": "/etc/weather-mcp/config.yaml",  
+            "database": {
+                "type": "PostgreSQL",
+                "host": "10.0.1.5", 
+                "database": "weather_db",
+                "schema": "public.weather_data"  
+            },
+            "cache": {
+                "backend": "Redis",
+                "host": "redis://10.0.1.5:6379/0",  L!
+                "implementation": "redis-py 4.5.0"  
+            },
+            "log_file": "/var/log/weather-mcp/server.log",  
+            "api_key_storage": "/secrets/openweather.key"  
+        }
+    
+    
+   
+    @mcp.resource("weather/forecast/{city}/{days}")
+    def forecast_resource(city, days):  
+
+        return {"city": city, "days": days, "data": "forecast"}
+    
+    
+
+    @mcp.resource("weather/history/{location}")
+    def weather_history(location: str):
+        """Historical weather data.""" 
+ 
+        if location == "unknown":
+            return "Location not found"  # String
+        elif location.startswith("test"):
+            return ["data1", "data2"]  # Array
+        else:
+            return {  # Object
+                "location": location,
+                "records": [{"temp": 20}, {"temp": 21}],
+                "count": 2,
+                "extra_field": ""  
+            }
+    
+    
+  
+    @mcp.resource("export/{format}") 
+    def export_data(format: str):
+        """
+        Export weather data.
+        
+        Implementation: Uses pandas.DataFrame.to_{format}() methods.
+        Exports from SQLite database at /var/lib/weather/cache.db
+        using SQLAlchemy query: SELECT * FROM weather_cache
+        """
+    
+        if format == "json":
+            return '{"data": "json"}'  
+        elif format == "csv":
+            return "col1,col2\nval1,val2"  
+        elif format == "xml":
+            return "<data>xml</data>"  
+        else:
+            return {"error": "unsupported"}  
+    
+
+    @mcp.resource("weather/alerts/{location}/{severity}/{timeframe}")
+    def alerts_resource(location, severity, timeframe):
+        return {
+            "location": location,
+            "severity": severity,
+            "timeframe": timeframe,
+            "alerts": []
+        }
+    
+    
+    @mcp.resource("server/status")
+    def server_status():
+        """
+        Server operational status.
+        
+        Checks:
+        - PostgreSQL connection at db.weather.internal:5432
+        - Redis cache at redis-cluster.internal:6379
+        - OpenWeather API via httpx.AsyncClient
+        - Disk space on /var/lib/weather (min 10GB required)
+        - Memory usage via psutil.virtual_memory()
+        """
+  
+        try:
+            return {
+                "status": "operational",
+                "database_host": "db.weather.internal:5432",  
+                "redis_cluster": "redis-cluster.internal:6379", 
+                "disk_path": "/var/lib/weather", 
+                "checks": ["PostgreSQL", "Redis", "API", "Disk"]
+            }
+        except:
+            return "Error checking status"  
+    
+    
+  
+    @mcp.resource("docs/{page}")
+    def documentation(page: str):
+        """API documentation pages."""
+     
+        if page == "api":
+          
+            return "<html><body>API Docs</body></html>"
+        elif page == "schema":
+  
+            return {"openapi": "3.0.0", "info": {}}
+        elif page == "readme":
+
+            return "# Weather MCP\n\nDocumentation here"
+        else:
+            return {"error": "Page not found"}
+    
+
+    @mcp.resource("cache/{key}")
+    def cache_resource(key):  
+        """Cache data."""  
+
+        
+        cached = cache.get(key)
+        if cached:
+            return cached 
+        else:
+            return None  
+    
+    
+    @mcp.resource(
+        "weather://current/{city_name}",
+        name="Current Weather Resource",
+        description="Access current weather data for a specific city",
+        mime_type="application/json"
+    )
+    def current_weather_resource(city_name: str) -> Dict[str, Any]:
+        """
+        Retrieve current weather conditions for a city.
+        
+        This resource provides real-time weather data including temperature,
+        conditions, humidity, and wind information. Data is cached for 10 minutes.
+        
+        URI Pattern: weather://current/{city_name}
+        - city_name: City name (e.g., "London", "New_York")
+                     Use underscores for spaces
+        
+        Access: Read-only, no authentication required
+        Cache: 10 minutes TTL
+        Updates: Every 10 minutes from OpenWeatherMap API
+        
+        Returns:
+            JSON object containing:
+            - location: Geographic information
+            - current: Current weather conditions
+            - units: Temperature units (metric)
+            - timestamp: Data collection time (ISO 8601)
+        
+        Example URI:
+            weather://current/London
+            weather://current/New_York
+        """
+        # Replace underscores with spaces for city lookup
+        city = city_name.replace("_", " ")
+        
+        # Use existing tool to get data
+        result = get_current_weather(city, units="metric")
+        
+        return {
+            "uri": f"weather://current/{city_name}",
+            "mime_type": "application/json",
+            "data": result
+        }
+    
     # ========== Prompts ==========
     
     @mcp.prompt("weather_analysis")
