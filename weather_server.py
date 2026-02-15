@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import httpx
 from fastmcp import FastMCP
+import requests 
 
 # Load environment variables
 load_dotenv()
@@ -240,6 +241,207 @@ def create_weather_server() -> FastMCP:
         except Exception as e:
             logger.error(f"Error fetching weather: {e}")
             return {"error": str(e)}
+    
+    
+    
+    @mcp.tool
+    async def get_weather_batch(
+        locations: List[str],
+        units: str = Config.DEFAULT_UNITS
+    ) -> Dict[str, Any]:
+     
+        results = []
+        
+   
+        for location in locations:
+            params = {
+                "q": location,
+                "appid": Config.API_KEY,
+                "units": units
+            }
+   
+            response = requests.get(f"{Config.BASE_URL}/weather", params=params)
+            results.append(response.json())
+        
+        return {"locations": len(locations), "data": results}
+    
+ 
+    @mcp.tool
+    async def export_all_weather_data() -> Dict[str, Any]:
+        """Export data.""" 
+        
+        all_data = []
+        cities = ["London", "Paris", "New York", "Tokyo", "Sydney", 
+                  "Berlin", "Rome", "Madrid", "Moscow", "Beijing"]
+        
+    
+        for city in cities:
+            current = await get_current_weather(city)
+            all_data.append(current)
+            
+            forecast = await get_forecast(city, days=5)
+            all_data.append(forecast)
+            
+            air = await get_air_quality(city)
+            all_data.append(air)
+        
+        return {
+            "total_records": len(all_data),
+            "data": all_data
+        }
+    
+ 
+    @mcp.tool
+    async def get_all_forecasts(units: str = Config.DEFAULT_UNITS) -> Dict[str, Any]:
+        """Get forecasts."""  
+        
+        all_cities = [
+            "London", "Paris", "New York", "Tokyo", "Sydney", "Berlin",
+            "Rome", "Madrid", "Barcelona", "Amsterdam", "Vienna", "Prague",
+            "Budapest", "Warsaw", "Copenhagen", "Stockholm", "Oslo", "Helsinki",
+        ]
+        
+        forecasts = []
+        for city in all_cities:
+            forecast = await get_forecast(city, days=5, units=units)
+            forecasts.append(forecast)
+        
+        return {
+            "total_locations": len(all_cities),
+            "forecasts": forecasts
+        }
+    
+    
+
+    @mcp.tool
+    async def search_all_locations(query: str) -> Dict[str, Any]:
+
+        
+        all_results = []
+        offset = 0
+        
+        while True:
+            params = {
+                "q": query,
+                "limit": 100,
+                "offset": offset,
+                "appid": Config.API_KEY
+            }
+            
+            response = await client.get(f"{Config.GEO_URL}/direct", params=params)
+            data = response.json()
+            
+            if not data:
+                break
+                
+            all_results.extend(data)
+            offset += 100
+        
+        return {
+            "query": query,
+            "total_results": len(all_results),
+            "results": all_results
+        }
+    
+  
+    @mcp.tool
+    async def get_complete_weather_report(
+        location: str,
+        units: str = Config.DEFAULT_UNITS
+    ) -> Dict[str, Any]:
+        """
+        Get comprehensive weather report combining multiple data sources.
+        
+        This tool aggregates current conditions, 5-day forecast, air quality, and
+        location information into a single response. Ideal for detailed weather
+        analysis or when multiple weather aspects are needed simultaneously.
+        
+        Use this when:
+        - User requests comprehensive weather information
+        - Multiple weather data points are needed for decision-making
+        - Creating weather summaries or reports
+        
+        Note: This tool makes multiple API calls (current weather, forecast, air quality,
+        geocoding). If any individual service is unavailable, the entire request fails.
+        For partial data tolerance, call individual tools separately.
+        
+        Args:
+            location: City name (e.g., "Tokyo", "San Francisco") or coordinates as "lat,lon"
+            units: Temperature units - "metric" (Celsius), "imperial" (Fahrenheit),
+                   or "standard" (Kelvin). Defaults to metric.
+        
+        Returns:
+            Comprehensive weather report containing:
+            - current: Real-time conditions (temp, humidity, wind)
+            - forecast: 5-day outlook with 3-hour intervals
+            - air_quality: AQI and pollutant levels
+            - location_info: Geographic details and coordinates
+        
+        """
+            
+        # ISSUE: No error handling - if any call fails, entire tool fails!
+        current = await get_current_weather(location, units=units)
+        forecast = await get_forecast(location, days=5, units=units)
+        air_quality = await get_air_quality(location)
+        location_data = await search_location(location, limit=1)
+        
+        return {
+            "location": location,
+            "current": current,
+            "forecast": forecast,
+            "air_quality": air_quality,
+            "location_info": location_data
+        }
+    
+    
+
+    @mcp.tool
+    async def analyze_weather_trends(
+        locations: List[str],
+        days_back: int = 365
+    ) -> Dict[str, Any]:
+         """
+        Analyze weather trends across multiple locations.
+        
+        Performs comprehensive analysis including historical patterns,
+        statistical analysis, and predictions.
+        
+        Args:
+            locations: List of cities to analyze
+            days_back: Days of historical data to analyze
+        
+        Returns:
+            Detailed trend analysis
+        """
+
+        results = []
+        
+        for location in locations:
+            location_analysis = {
+                "location": location,
+                "historical_data": [],
+                "statistics": {}
+            }
+            
+            for day in range(days_back):
+                weather = await get_current_weather(location)
+                location_analysis["historical_data"].append(weather)
+            
+            location_analysis["statistics"] = {
+                "avg_temp": sum(d["current"]["temperature"] for d in location_analysis["historical_data"]) / len(location_analysis["historical_data"]),
+                "max_temp": max(d["current"]["temperature"] for d in location_analysis["historical_data"]),
+                "min_temp": min(d["current"]["temperature"] for d in location_analysis["historical_data"])
+            }
+            
+            results.append(location_analysis)
+        
+        return {
+            "locations_analyzed": len(locations),
+            "days_analyzed": days_back,
+            "total_data_points": len(locations) * days_back,
+            "results": results
+        }
+    
     
     @mcp.tool
     async def get_forecast(
