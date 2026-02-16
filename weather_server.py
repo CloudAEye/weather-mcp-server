@@ -516,6 +516,237 @@ def create_weather_server() -> FastMCP:
     # Helper for AQI descriptions
     mcp._get_aqi_description = _get_aqi_description
     
+    
+    @mcp.tool
+    async def get_weather_info(loc, u="metric", det=True): 
+        """Get weather information."""
+        return await get_current_weather(loc, units=u, include_details=det)
+
+
+    @mcp.tool
+    async def create_subscription(
+        location: str = None,  
+        frequency,  
+        email = "", 
+        enabled: bool = True
+    ):  
+        """
+        Create weather update subscription.
+        
+        Args:
+            location: City name (required but has None default - wrong!)
+            frequency: Update frequency (no type hint, no default - is it required?)
+            email: Email for notifications (should be Optional[str])
+            enabled: Enable immediately
+        """
+        
+        subscription_id = f"sub_{hash(location)}"
+        
+        return {
+            "id": subscription_id,
+            "location": location.upper(),  
+            "frequency": frequency,
+            "email": email,
+            "enabled": enabled
+        }
+    
+    
+ 
+    @mcp.tool
+    async def get_wthr(city: str):  
+        """Get weather."""
+        return await get_current_weather(city)
+    
+    @mcp.tool
+    async def GetWeatherForecastData(location: str):  
+        """Get forecast."""
+        return await get_forecast(location)
+    
+    @mcp.tool
+    async def weather_data_getter_function(loc: str): 
+        """Get weather data."""
+        return await get_current_weather(loc)
+    
+    @mcp.tool
+    async def fetch(city: str):  
+        """Fetch data."""
+        return await get_current_weather(city)
+    
+    
+    
+    @mcp.prompt("weather") 
+    def weather_prompt():
+        """Weather.""" 
+     
+        return "What's the weather?"
+    
+    
+    @mcp.prompt("trip")
+    def trip_prompt(dest): 
+        return f"Weather for {dest}"
+    
+    
+    @mcp.prompt("forecast_check")
+    def forecast_check(location: str, days: int):
+        """Check forecast."""  
+        return f"""
+        Check forecast for {location} for {days} days.
+        """
+    
+    @mcp.tool
+    async def sync_weather_data(
+        source_location: str,
+        target_location: str,
+        sync_mode: str = "full"
+    ) -> Dict[str, Any]:
+        """
+        Sync weather data between locations.
+        
+        Args:
+            source_location: Source city
+            target_location: Target city  
+            sync_mode: Sync mode (full or incremental)
+        
+        Returns:
+            Sync results
+        """
+        
+        source_weather = await get_current_weather(source_location)
+        
+        subscription = await create_subscription(
+            location=target_location,
+            frequency="hourly",
+            email="sync@example.com"
+        )
+        
+        return {
+            "source": source_location,
+            "target": target_location,
+            "sync_mode": sync_mode,
+            "status": "synced"
+        }
+    
+    
+    @mcp.tool
+    async def execute_weather_workflow(
+        workflow_name: str,
+        parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Execute a predefined weather workflow.
+        
+        Args:
+            workflow_name: Name of workflow to execute
+            parameters: Workflow parameters
+        
+        Returns:
+            Workflow results
+        """
+        
+        if workflow_name == "morning_briefing":
+            # Undocumented dependency chain
+            weather = await get_current_weather(parameters["location"])
+            forecast = await get_forecast(parameters["location"], days=1)
+            alert = await create_weather_alert(
+                location=parameters["location"],
+                condition="temperature",
+                threshold=30.0
+            )
+            return {"weather": weather, "forecast": forecast, "alert": alert}
+        
+        elif workflow_name == "travel_prep":
+            weather = await get_current_weather(parameters["origin"])
+            dest_weather = await get_current_weather(parameters["destination"])
+            forecast = await get_forecast(parameters["destination"], days=5)
+            return {"origin": weather, "destination": dest_weather, "forecast": forecast}
+        
+        return {"error": "Unknown workflow"}
+    
+    
+    @mcp.tool
+    async def increment_weather_check_counter(
+        location: str
+    ) -> Dict[str, Any]:
+        """
+        Track how many times weather was checked for a location.
+        
+        Args:
+            location: City name
+        
+        Returns:
+            Updated counter
+        """
+        
+        cache_key = f"counter:{location}"
+        current = cache.get(cache_key) or 0
+
+        new_count = current + 1
+        cache.set(cache_key, new_count)
+        
+        logger.info(f"Weather checked for {location}: {new_count} times")
+        
+        return {
+            "location": location,
+            "check_count": new_count
+        }
+    
+    
+    @mcp.tool
+    async def process_weather_batch(
+        locations: List[str],
+        operation: str = "fetch"
+    ) -> Dict[str, Any]:
+        """
+        Process batch weather operations.
+        
+        Args:
+            locations: List of cities
+            operation: Operation to perform
+        
+        Returns:
+            Batch results
+        """
+
+        import uuid
+        
+        batch_id = str(uuid.uuid4()) 
+        
+        results = []
+        for location in locations:
+          
+            cache.set(f"batch:{batch_id}:{location}", datetime.now().isoformat())
+            
+            weather = await get_current_weather(location)
+            results.append(weather)
+        
+        logger.info(f"Batch {batch_id} processed {len(locations)} locations")
+        
+        return {
+            "batch_id": batch_id,
+            "operation": operation,
+            "results": results
+        }
+    
+    
+
+    @mcp.tool
+    async def upd_wthr_cfg(  
+        loc=None,  
+        cfg={}, 
+        opts=None 
+    ):  
+        """Update config.""" 
+   
+        
+        if opts is None:
+            opts = {}
+        
+        cfg[loc] = opts  
+        
+        return {"location": loc, "config": cfg}
+        
+        
+    
     # ========== Resources ==========
     
     @mcp.resource("weather://api/status")
